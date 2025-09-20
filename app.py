@@ -23,6 +23,8 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 try:
     openai_client = OpenAIIntegration()
     print("✅ OpenAI integration initialized successfully")
+    if not openai_client.api_available:
+        print("⚠️  OpenAI API has quota/billing issues - running in fallback mode")
 except Exception as e:
     print(f"❌ OpenAI integration failed: {e}")
     openai_client = None

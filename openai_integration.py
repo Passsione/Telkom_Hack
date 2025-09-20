@@ -22,23 +22,32 @@ class OpenAIIntegration:
     
     def __init__(self, api_key: str = None):
         """Initialize OpenAI client"""
-        self.api_key = api_key or os.environ.get('OPENAI_API_KEY')
+        self.api_key = api_key or os.environ.get('OPENROUTER_API_KEY')
         if not self.api_key:
-            raise ValueError("OpenAI API key is required. Set OPENAI_API_KEY environment variable or pass api_key parameter.")
+            raise ValueError("OpenRouter API key is required. Set OPENROUTER_API_KEY environment variable.")
         
-        # Initialize OpenAI client
-        openai.api_key = self.api_key
-        self.client = openai.OpenAI(api_key=self.api_key)
+        # --- MODIFIED: Initialize OpenAI client to point to OpenRouter's API endpoint ---
+        self.client = openai.OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=self.api_key,
+            default_headers={
+                "HTTP-Referer": os.environ.get('YOUR_SITE_URL', 'http://localhost:5000'),
+                "X-Title": os.environ.get('YOUR_SITE_NAME', 'T-Help Assistant'),
+            }
+        )
         
-        # Model configurations - using latest available models
+        # --- MODIFIED: Model configurations updated for OpenRouter's free and compatible models ---
         self.models = {
-            'primary': 'gpt-5',  # Latest and most capable
-            'fallback': 'gpt-4.1',  # High performance fallback
-            'cost_efficient': 'gpt-4.1-mini',  # Cost-efficient option
-            'fast': 'gpt-4.1-nano',  # Fastest response
-            'vision': 'gpt-5',  # For image analysis
-            'audio': 'whisper-1'  # For speech recognition
+            'primary': 'openai/gpt-oss-120b:free',      # Free model from your chat.py
+            'fallback': 'mistralai/mistral-7b-instruct:free', # A good free fallback
+            'cost_efficient': 'openai/gpt-oss-120b:free', # Use the main free model
+            'fast': 'mistralai/mistral-7b-instruct:free',
+            'vision': 'google/gemini-pro-vision',       # OpenRouter compatible vision model
+            'audio': 'openai/whisper-1'                 # OpenRouter supports Whisper
         }
+        
+        # Check API status on initialization
+        self.api_available = self._test_api_connection()
         
         # Telkom-specific system prompt
         self.system_prompt = self._create_telkom_system_prompt()
@@ -49,6 +58,25 @@ class OpenAIIntegration:
             'zulu': ['ngi', 'uku', 'ngi-', 'isi', 'aba', 'ama', 'sawubona', 'ngiyabonga', 'unjani', 'kunjani'],
             'english': ['the', 'and', 'you', 'how', 'what', 'where', 'when', 'why', 'please', 'thank']
         }
+
+    def _test_api_connection(self) -> bool:
+        """Test API connection and quota"""
+        try:
+            # Make a minimal API call to test connection
+            response = self.client.chat.completions.create(
+                model=self.models['cost_efficient'],
+                messages=[{"role": "user", "content": "test"}],
+                max_tokens=1
+            )
+            logger.info("✅ OpenAI API connection successful")
+            return True
+        except Exception as e:
+            logger.error(f"❌ OpenAI API connection failed: {str(e)}")
+            if "insufficient_quota" in str(e):
+                logger.error("💳 Please check your OpenAI billing and usage limits")
+            elif "rate_limit" in str(e):
+                logger.error("⏰ Rate limit exceeded - please wait and try again")
+            return False
 
     def _create_telkom_system_prompt(self) -> str:
         """Create specialized system prompt for Telkom technical support"""
@@ -106,18 +134,22 @@ Respond in the same language as the customer's query."""
         Process text message and generate AI response
         """
         try:
+            # Check if API is available
+            if not self.api_available:
+                return self._create_quota_exceeded_response()
+            
             # Detect language if not provided
             if not language:
                 language = self.detect_language(message)
             
             # Choose appropriate model
-            model_name = model or self.models['primary']
+            model_name = model or self.models['cost_efficient']  # Use cheapest first
             
             # Prepare conversation history
             messages = [{"role": "system", "content": self.system_prompt}]
             
             if conversation_history:
-                messages.extend(conversation_history[-10:])  # Keep last 10 messages for context
+                messages.extend(conversation_history[-6:])  # Keep last 6 messages for context (reduced)
             
             messages.append({"role": "user", "content": message})
             
@@ -125,7 +157,7 @@ Respond in the same language as the customer's query."""
             response = await self._make_api_call(
                 model=model_name,
                 messages=messages,
-                max_tokens=1000,
+                max_tokens=500,  # Reduced to save costs
                 temperature=0.7
             )
             
@@ -140,6 +172,9 @@ Respond in the same language as the customer's query."""
             
         except Exception as e:
             logger.error(f"Error processing text message: {str(e)}")
+            if "insufficient_quota" in str(e) or "429" in str(e):
+                self.api_available = False  # Mark API as unavailable
+                return self._create_quota_exceeded_response()
             return self._create_error_response(e)
 
     async def process_image_message(
@@ -266,24 +301,70 @@ Respond in the same language as the customer's query."""
 
     async def _make_api_call(self, **kwargs) -> Dict[str, Any]:
         """
-        Make API call with fallback models
+        Make API call with fallback models and better error handling
         """
+        # If API is not available, skip trying
+        if not self.api_available:
+            raise Exception("OpenAI API quota exceeded or unavailable")
+        
         models_to_try = [
-            kwargs.get('model', self.models['primary']),
+            self.models['cost_efficient'],  # Try cheapest first
             self.models['fallback'],
-            self.models['cost_efficient']
         ]
+        
+        # Only try primary if explicitly requested
+        if kwargs.get('model') == self.models['primary']:
+            models_to_try = [self.models['primary']] + models_to_try
+        
+        last_error = None
         
         for model in models_to_try:
             try:
                 kwargs['model'] = model
                 response = self.client.chat.completions.create(**kwargs)
+                logger.info(f"✅ Successfully used model: {model}")
                 return response.model_dump()
             except Exception as e:
-                logger.warning(f"Model {model} failed: {str(e)}")
+                last_error = e
+                error_str = str(e)
+                logger.warning(f"❌ Model {model} failed: {error_str}")
+                
+                # Check for quota/billing issues
+                if "insufficient_quota" in error_str or "429" in error_str:
+                    self.api_available = False
+                    logger.error("💳 OpenAI quota exceeded - switching to fallback mode")
+                    raise e
+                
+                # If rate limited, wait a bit
+                if "rate_limit" in error_str.lower():
+                    logger.info("⏰ Rate limited - waiting 2 seconds...")
+                    await asyncio.sleep(2)
+                
                 if model == models_to_try[-1]:
                     raise e
                 continue
+        
+        raise last_error
+
+    def _create_quota_exceeded_response(self) -> Dict[str, Any]:
+        """Create response when OpenAI quota is exceeded"""
+        return {
+            'success': False,
+            'response': """I'm currently experiencing API limitations with my AI service. However, I can still help you with Telkom technical support! 
+
+For immediate assistance:
+• Internet issues: Try restarting your router (unplug for 30 seconds)
+• Slow speeds: Check if other devices have the same issue
+• Wi-Fi problems: Move closer to router or check password
+• Email setup: Use these settings - SMTP: smtp.telkom.net, Port: 587
+
+For complex issues, please call Telkom support at 10210 or visit a Telkom store.
+
+Would you like me to provide more specific troubleshooting steps?""",
+            'model_used': 'fallback_mode',
+            'error_type': 'quota_exceeded',
+            'timestamp': datetime.now().isoformat()
+        }
 
     def _encode_image_to_base64(self, image_path: str) -> str:
         """Encode image to base64 string"""
