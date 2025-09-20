@@ -1,0 +1,7 @@
+Flask
+openai
+Pillow
+python-dotenv
+SpeechRecognition
+PyPDF2
+Werkzeug

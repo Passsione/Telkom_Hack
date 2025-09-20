@@ -1,0 +1,416 @@
+{% extends "index.html" %}
+
+{% block head %}
+    <title>Chat with T-HELP</title>
+      <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'whatsapp-green': '#25D366',
+                        'whatsapp-dark': '#075E54',
+                        'whatsapp-light': '#DCF8C6',
+                        'telkom-blue': '#0066CC',
+                        'telkom-orange': '#FF6600'
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Link to a custom stylesheet in the static folder -->
+    <!-- <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"> -->
+{% endblock %}
+
+{% block content %}
+   <!-- Main Container -->
+    <div class="flex flex-col h-screen max-w-md mx-auto bg-white shadow-xl">
+        
+        <!-- Header -->
+        <div class="bg-telkom-blue text-white p-4 flex items-center space-x-3 shadow-lg">
+            <div class="w-10 h-10 bg-telkom-orange rounded-full flex items-center justify-center">
+                <i class="fas fa-robot text-white"></i>
+            </div>
+            <div class="flex-1">
+                <h1 class="font-semibold text-lg">T-Help Assistant</h1>
+                <p class="text-sm opacity-75">Telkom Technical Support</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <i class="fas fa-phone cursor-pointer hover:bg-blue-600 p-2 rounded-full"></i>
+                <i class="fas fa-video cursor-pointer hover:bg-blue-600 p-2 rounded-full"></i>
+                <i class="fas fa-ellipsis-v cursor-pointer hover:bg-blue-600 p-2 rounded-full"></i>
+            </div>
+        </div>
+
+        <!-- Chat Messages Area -->
+        <div id="chatContainer" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-gray-50 to-gray-100">
+            <!-- Welcome Message -->
+            <div class="flex items-start space-x-2">
+                <div class="w-8 h-8 bg-telkom-orange rounded-full flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-robot text-white text-sm"></i>
+                </div>
+                <div class="bg-white p-3 rounded-lg shadow-sm max-w-xs">
+                    <p class="text-sm">Hello! I'm T-Help, your Telkom technical assistant. How can I help you today?</p>
+                    <p class="text-xs text-gray-500 mt-1">Just now</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Typing Indicator (hidden by default) -->
+        <div id="typingIndicator" class="px-4 py-2 hidden">
+            <div class="flex items-center space-x-2">
+                <div class="w-8 h-8 bg-telkom-orange rounded-full flex items-center justify-center">
+                    <i class="fas fa-robot text-white text-sm"></i>
+                </div>
+                <div class="bg-white p-2 rounded-lg shadow-sm">
+                    <div class="flex space-x-1">
+                        <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                        <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s"></div>
+                        <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="p-4 bg-white border-t border-gray-200">
+            <!-- File Upload Preview (hidden by default) -->
+            <div id="filePreview" class="mb-3 p-3 bg-gray-50 rounded-lg hidden">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                        <i id="fileIcon" class="fas fa-file text-telkom-blue"></i>
+                        <span id="fileName" class="text-sm text-gray-700"></span>
+                    </div>
+                    <button onclick="cancelFileUpload()" class="text-red-500 hover:text-red-700">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Voice Recording Indicator (hidden by default) -->
+            <div id="voiceRecording" class="mb-3 p-3 bg-red-50 rounded-lg hidden">
+                <div class="flex items-center space-x-3">
+                    <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                    <span class="text-sm text-red-600">Recording... <span id="recordingTime">00:00</span></span>
+                    <div class="flex-1"></div>
+                    <button onclick="stopRecording()" class="bg-red-500 text-white px-3 py-1 rounded-full text-sm hover:bg-red-600">
+                        <i class="fas fa-stop"></i> Stop
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Input -->
+            <div class="flex items-center space-x-2">
+                <!-- Attachment Button -->
+                <button onclick="toggleAttachmentMenu()" class="p-2 text-gray-500 hover:text-telkom-blue transition-colors">
+                    <i class="fas fa-paperclip text-xl"></i>
+                </button>
+
+                <!-- Message Input -->
+                <div class="flex-1 relative">
+                    <input 
+                        type="text" 
+                        id="messageInput" 
+                        placeholder="Type a message..." 
+                        class="w-full p-3 bg-gray-50 rounded-full border border-gray-200 focus:outline-none focus:border-telkom-blue transition-colors"
+                        onkeypress="handleKeyPress(event)"
+                    >
+                    <button onclick="sendMessage()" class="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-telkom-blue hover:bg-blue-50 rounded-full">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+
+                <!-- Voice Button -->
+                <button id="voiceButton" onmousedown="startRecording()" onmouseup="stopRecording()" ontouchstart="startRecording()" ontouchend="stopRecording()" class="p-2 text-gray-500 hover:text-telkom-blue transition-colors">
+                    <i class="fas fa-microphone text-xl"></i>
+                </button>
+            </div>
+
+            <!-- Hidden File Input -->
+            <input type="file" id="fileInput" class="hidden" onchange="handleFileSelect(event)" 
+                   accept=".jpg,.jpeg,.png,.gif,.mp4,.avi,.mov,.pdf,.doc,.docx,.wav,.mp3,.ogg">
+
+            <!-- Attachment Menu (hidden by default) -->
+            <div id="attachmentMenu" class="absolute bottom-20 left-4 right-4 bg-white rounded-lg shadow-xl border border-gray-200 p-4 hidden">
+                <div class="grid grid-cols-3 gap-4 text-center">
+                    <button onclick="selectFileType('image')" class="p-3 hover:bg-gray-50 rounded-lg transition-colors">
+                        <i class="fas fa-image text-2xl text-purple-500 mb-2"></i>
+                        <p class="text-sm text-gray-700">Photo</p>
+                    </button>
+                    <button onclick="selectFileType('video')" class="p-3 hover:bg-gray-50 rounded-lg transition-colors">
+                        <i class="fas fa-video text-2xl text-red-500 mb-2"></i>
+                        <p class="text-sm text-gray-700">Video</p>
+                    </button>
+                    <button onclick="selectFileType('document')" class="p-3 hover:bg-gray-50 rounded-lg transition-colors">
+                        <i class="fas fa-file-alt text-2xl text-blue-500 mb-2"></i>
+                        <p class="text-sm text-gray-700">Document</p>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables
+        let currentSessionId = null;
+        let selectedFile = null;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let recordingStartTime = null;
+        let recordingTimer = null;
+
+        // Initialize chat
+        document.addEventListener('DOMContentLoaded', function() {
+            generateSessionId();
+        });
+
+        function generateSessionId() {
+            currentSessionId = 'session_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function toggleAttachmentMenu() {
+            const menu = document.getElementById('attachmentMenu');
+            menu.classList.toggle('hidden');
+        }
+
+        function selectFileType(type) {
+            const fileInput = document.getElementById('fileInput');
+            
+            // Set accept attribute based on type
+            switch(type) {
+                case 'image':
+                    fileInput.accept = '.jpg,.jpeg,.png,.gif';
+                    break;
+                case 'video':
+                    fileInput.accept = '.mp4,.avi,.mov';
+                    break;
+                case 'document':
+                    fileInput.accept = '.pdf,.doc,.docx,.txt';
+                    break;
+            }
+            
+            fileInput.click();
+            toggleAttachmentMenu();
+        }
+
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedFile = file;
+                showFilePreview(file);
+            }
+        }
+
+        function showFilePreview(file) {
+            const preview = document.getElementById('filePreview');
+            const icon = document.getElementById('fileIcon');
+            const name = document.getElementById('fileName');
+            
+            // Set appropriate icon
+            const fileType = file.type;
+            if (fileType.startsWith('image/')) {
+                icon.className = 'fas fa-image text-purple-500';
+            } else if (fileType.startsWith('video/')) {
+                icon.className = 'fas fa-video text-red-500';
+            } else if (fileType.includes('pdf')) {
+                icon.className = 'fas fa-file-pdf text-red-600';
+            } else {
+                icon.className = 'fas fa-file text-telkom-blue';
+            }
+            
+            name.textContent = file.name;
+            preview.classList.remove('hidden');
+        }
+
+        function cancelFileUpload() {
+            selectedFile = null;
+            document.getElementById('filePreview').classList.add('hidden');
+            document.getElementById('fileInput').value = '';
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+                
+                mediaRecorder.start();
+                recordingStartTime = Date.now();
+                
+                // Show recording indicator
+                document.getElementById('voiceRecording').classList.remove('hidden');
+                startRecordingTimer();
+                
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                alert('Could not access microphone. Please check permissions.');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    sendVoiceMessage(audioBlob);
+                };
+            }
+            
+            // Hide recording indicator
+            document.getElementById('voiceRecording').classList.add('hidden');
+            stopRecordingTimer();
+        }
+
+        function startRecordingTimer() {
+            recordingTimer = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                const minutes = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const seconds = (elapsed % 60).toString().padStart(2, '0');
+                document.getElementById('recordingTime').textContent = `${minutes}:${seconds}`;
+            }, 1000);
+        }
+
+        function stopRecordingTimer() {
+            if (recordingTimer) {
+                clearInterval(recordingTimer);
+                recordingTimer = null;
+            }
+            document.getElementById('recordingTime').textContent = '00:00';
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            // Allow empty message if file is selected (WhatsApp behavior)
+            if (!message && !selectedFile) return;
+            
+            // Prepare form data
+            const formData = new FormData();
+            formData.append('session_id', currentSessionId);
+            
+            // Add text message (can be combined with file)
+            if (message) {
+                formData.append('message', message);
+            }
+            
+            // Add file if selected
+            if (selectedFile) {
+                formData.append('file', selectedFile);
+                cancelFileUpload();
+            }
+            
+            sendRequest(formData);
+            messageInput.value = '';
+        }
+
+        function sendVoiceMessage(audioBlob) {
+            const formData = new FormData();
+            formData.append('session_id', currentSessionId);
+            formData.append('voice_data', audioBlob, 'voice_message.webm');
+            sendRequest(formData);
+        }
+
+        async function sendRequest(formData) {
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch('/send_message', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    addMessageToChat(data.user_message);
+                    setTimeout(() => {
+                        hideTypingIndicator();
+                        addMessageToChat(data.ai_message);
+                    }, 1500);
+                } else {
+                    hideTypingIndicator();
+                    console.error('Error:', data.message);
+                }
+            } catch (error) {
+                hideTypingIndicator();
+                console.error('Network error:', error);
+            }
+        }
+
+        function addMessageToChat(message) {
+            const chatContainer = document.getElementById('chatContainer');
+            const messageElement = createMessageElement(message);
+            chatContainer.appendChild(messageElement);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function createMessageElement(message) {
+            const messageDiv = document.createElement('div');
+            
+            if (message.type === 'user') {
+                messageDiv.className = 'flex justify-end';
+                messageDiv.innerHTML = `
+                    <div class="bg-telkom-blue text-white p-3 rounded-lg max-w-xs shadow-sm">
+                        <p class="text-sm">${escapeHtml(message.content)}</p>
+                        <p class="text-xs opacity-75 mt-1 text-right">${message.timestamp}</p>
+                    </div>
+                `;
+            } else {
+                messageDiv.className = 'flex items-start space-x-2';
+                messageDiv.innerHTML = `
+                    <div class="w-8 h-8 bg-telkom-orange rounded-full flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-robot text-white text-sm"></i>
+                    </div>
+                    <div class="bg-white p-3 rounded-lg shadow-sm max-w-xs">
+                        <p class="text-sm">${escapeHtml(message.content).replace(/\n/g, '<br>')}</p>
+                        <p class="text-xs text-gray-500 mt-1">${message.timestamp}</p>
+                    </div>
+                `;
+            }
+            
+            return messageDiv;
+        }
+
+        function showTypingIndicator() {
+            document.getElementById('typingIndicator').classList.remove('hidden');
+            const chatContainer = document.getElementById('chatContainer');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function hideTypingIndicator() {
+            document.getElementById('typingIndicator').classList.add('hidden');
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // Close attachment menu when clicking outside
+        document.addEventListener('click', function(event) {
+            const menu = document.getElementById('attachmentMenu');
+            const button = event.target.closest('[onclick="toggleAttachmentMenu()"]');
+            
+            if (!menu.contains(event.target) && !button) {
+                menu.classList.add('hidden');
+            }
+        });
+    </script>
+{% endblock %}
