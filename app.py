@@ -6,7 +6,8 @@ import base64
 from werkzeug.utils import secure_filename
 import uuid
 import asyncio
-from openai_integration import OpenAIIntegration
+from gemini_integration import GeminiIntegration 
+
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this-in-production'
@@ -19,15 +20,13 @@ MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# Initialize OpenAI Integration
+# Initialize Gemini Integration <-- RENAMED VARIABLE
 try:
-    openai_client = OpenAIIntegration()
-    print("✅ OpenAI integration initialized successfully")
-    if not openai_client.api_available:
-        print("⚠️  OpenAI API has quota/billing issues - running in fallback mode")
+    gemini_client = GeminiIntegration()
 except Exception as e:
-    print(f"❌ OpenAI integration failed: {e}")
-    openai_client = None
+    print(f"❌ Gemini integration failed: {e}")
+    gemini_client = None
+
 
 # In-memory chat storage (replace with database later)
 chat_sessions = {}
@@ -52,57 +51,38 @@ def get_file_type(filename):
 
 async def generate_ai_response(message_content, message_type='text', file_path=None, session_id=None):
     """
-    Generate AI response using OpenAI integration
+    Generate AI response using Gemini integration
     """
-    if not openai_client:
-        # Fallback to demo responses if OpenAI is not available
-        return simulate_ai_response_fallback(message_content, message_type)
+    if not gemini_client:
+        return "The AI assistant is currently unavailable due to a configuration error."
     
     try:
-        # Get conversation history for context
-        conversation_history = []
-        if session_id and session_id in chat_sessions:
-            # Convert chat history to OpenAI format
-            for msg in chat_sessions[session_id][-6:]:  # Last 6 messages for context
-                if msg['type'] == 'user':
-                    conversation_history.append({
-                        "role": "user", 
-                        "content": msg.get('text_content', msg['content'])
-                    })
-                elif msg['type'] == 'ai':
-                    conversation_history.append({
-                        "role": "assistant", 
-                        "content": msg['content']
-                    })
+        conversation_history = chat_sessions.get(session_id, [])[-6:]
         
-        # Process based on message type
         if message_type == 'image' and file_path:
-            response = await openai_client.process_image_message(
+            response_data = await gemini_client.process_image_message(
                 image_path=file_path,
                 text_message=message_content
             )
-        elif message_type == 'audio' and file_path:
-            response = await openai_client.process_audio_message(file_path)
         elif message_type == 'pdf' and file_path:
-            response = await openai_client.process_pdf_document(
+            response_data = await gemini_client.process_pdf_document(
                 pdf_path=file_path,
                 text_message=message_content
             )
-        else:
-            # Text message or file with text
-            response = await openai_client.process_text_message(
+        # --- VOICE NOTE FEATURE REMOVED ---
+        elif message_type == 'audio' and file_path:
+            return "I'm sorry, I can't process voice notes with my current configuration."
+        else: # Text message
+            response_data = await gemini_client.process_text_message(
                 message=message_content,
                 conversation_history=conversation_history
             )
         
-        if response['success']:
-            return response['response']
-        else:
-            return f"I apologize, I'm experiencing technical difficulties: {response.get('error', 'Unknown error')}. Please try again or contact Telkom support directly."
+        return response_data['response'] if response_data['success'] else response_data['error']
     
     except Exception as e:
         print(f"AI Response Error: {e}")
-        return "I'm currently experiencing technical difficulties. Please try again in a moment or contact Telkom support directly for immediate assistance."
+        return "I'm experiencing technical difficulties. Please try again or contact Telkom support."
 
 def simulate_ai_response_fallback(message, message_type='text', user_language='en'):
     """
@@ -167,12 +147,10 @@ def send_message():
                 }
                 chat_sessions[session_id].append(user_message)
                 
-                # Generate AI response using OpenAI
+                # Generate AI response using Gemini
                 ai_response_text = asyncio.run(generate_ai_response(
-                    message_content="Voice message received",
-                    message_type='audio',
-                    file_path=voice_path,
-                    session_id=session_id
+                message_content=message_for_ai, message_type=file_type,
+                file_path=file_path, session_id=session_id
                 ))
                 
                 ai_message = {
@@ -221,12 +199,9 @@ def send_message():
                 }
                 chat_sessions[session_id].append(user_message)
                 
-                # Generate AI response using OpenAI
+                # Generate AI response using Gemini
                 ai_response_text = asyncio.run(generate_ai_response(
-                    message_content=message_for_ai,
-                    message_type=file_type,
-                    file_path=file_path,
-                    session_id=session_id
+                message_content=text_message, session_id=session_id
                 ))
                 
                 ai_message = {
@@ -300,18 +275,6 @@ def get_chat_history(session_id):
             'messages': []
         })
 
-@app.route('/api_status')
-def api_status():
-    """Check OpenAI API status and available models"""
-    if openai_client:
-        status = asyncio.run(openai_client.get_model_status() if hasattr(openai_client, 'get_model_status') else {'success': True, 'status': 'Connected'})
-        return jsonify(status)
-    else:
-        return jsonify({
-            'success': False,
-            'error': 'OpenAI client not initialized',
-            'message': 'Please set OPENAI_API_KEY environment variable'
-        })
 
 # Run the app
 if __name__ == '__main__':
