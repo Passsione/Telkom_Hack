@@ -42,7 +42,8 @@ class GeminiIntegration:
 
     def _create_telkom_system_prompt(self) -> str:
         """Create specialized system prompt for Telkom technical support"""
-        return """You are T-Help, an expert Telkom technical support assistant. Your role is to help customers troubleshoot technical issues with their Telkom services including:
+        return """DONT INCLUDE ANY BOLD TEXT OR FANCY FORMATTING, we need the text as a whatsapp text message.
+                You are T-Help, an expert Telkom technical support assistant. Your role is to help customers troubleshoot technical issues with their Telkom services including:
                 - Internet connectivity problems (Wi-Fi, ADSL/Fiber)
                 - Mobile network problems
                 - Device and email configuration
@@ -51,7 +52,8 @@ class GeminiIntegration:
                 - Screenshots: Identify error messages and provide solutions.
                 - Bills/Documents: Help understand technical service details.
                 - Videos: Describe technical procedures shown.
-                Always be helpful, patient, and professional. Provide step-by-step instructions and ask clarifying questions. Respond in the same language as the customer's query."""
+                Always be helpful, patient, and professional. Provide step-by-step instructions and ask clarifying questions. Respond in the same language as the customer's query. 
+                """
 
     def _format_history(self, history: List[Dict]) -> List[Dict]:
         """Formats the chat history for the Gemini API."""
@@ -61,7 +63,6 @@ class GeminiIntegration:
             content = msg.get('text_content', msg.get('content', ''))
             formatted.append({'role': role, 'parts': [content]})
         return formatted
-
     
     def _validate_audio_file(self, audio_path: str) -> Dict[str, Any]:
         """Validate audio file format and size"""
