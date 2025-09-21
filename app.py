@@ -6,8 +6,11 @@ import base64
 from werkzeug.utils import secure_filename
 import uuid
 import asyncio
+import nest_asyncio
 from gemini_integration import GeminiIntegration 
 
+# Allow nested event loops
+nest_asyncio.apply()
 
 app = Flask(__name__)
 app.secret_key = 'your-secret-key-change-this-in-production'
@@ -19,16 +22,16 @@ MAX_FILE_SIZE = 16 * 1024 * 1024  # 16MB
 
 # Ensure upload directory exists
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Initialize Gemini Integration <-- RENAMED VARIABLE
+# Initialize Gemini Integration
 try:
     gemini_client = GeminiIntegration()
 except Exception as e:
     print(f"❌ Gemini integration failed: {e}")
     gemini_client = None
 
-
-# In-memory chat storage (replace with database later)
+# In-memory chat storage
 chat_sessions = {}
 
 def allowed_file(filename):
@@ -49,9 +52,9 @@ def get_file_type(filename):
     else:
         return 'document'
 
-async def generate_ai_response(message_content, message_type='text', file_path=None, session_id=None):
+def generate_ai_response(message_content, message_type='text', file_path=None, session_id=None):
     """
-    Generate AI response using Gemini integration
+    Generate AI response using Gemini integration - SYNC VERSION
     """
     if not gemini_client:
         return "The AI assistant is currently unavailable due to a configuration error."
@@ -59,23 +62,43 @@ async def generate_ai_response(message_content, message_type='text', file_path=N
     try:
         conversation_history = chat_sessions.get(session_id, [])[-6:]
         
+        # Get or create event loop
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
         if message_type == 'image' and file_path:
-            response_data = await gemini_client.process_image_message(
-                image_path=file_path,
-                text_message=message_content
+            response_data = loop.run_until_complete(
+                gemini_client.process_image_message(
+                    image_path=file_path,
+                    text_message=message_content,
+                    conversation_history=conversation_history
+                )
+            )
+        elif message_type in ['audio', 'video'] and file_path:
+            response_data = loop.run_until_complete(
+                gemini_client.process_audio_message(
+                    audio_path=file_path,
+                    text_message=message_content,
+                    conversation_history=conversation_history
+                )
             )
         elif message_type == 'pdf' and file_path:
-            response_data = await gemini_client.process_pdf_document(
-                pdf_path=file_path,
-                text_message=message_content
+            response_data = loop.run_until_complete(
+                gemini_client.process_pdf_document(
+                    pdf_path=file_path,
+                    text_message=message_content,
+                    conversation_history=conversation_history
+                )
             )
-        # --- VOICE NOTE FEATURE REMOVED ---
-        elif message_type == 'audio' and file_path:
-            return "I'm sorry, I can't process voice notes with my current configuration."
-        else: # Text message
-            response_data = await gemini_client.process_text_message(
-                message=message_content,
-                conversation_history=conversation_history
+        else:  # Text message
+            response_data = loop.run_until_complete(
+                gemini_client.process_text_message(
+                    message=message_content,
+                    conversation_history=conversation_history
+                )
             )
         
         return response_data['response'] if response_data['success'] else response_data['error']
@@ -83,33 +106,6 @@ async def generate_ai_response(message_content, message_type='text', file_path=N
     except Exception as e:
         print(f"AI Response Error: {e}")
         return "I'm experiencing technical difficulties. Please try again or contact Telkom support."
-
-def simulate_ai_response_fallback(message, message_type='text', user_language='en'):
-    """
-    Fallback AI response simulation when OpenAI is not available
-    """
-    responses = {
-        'en': {
-            'greeting': "Hello! I'm T-Help, your Telkom technical assistant. I'm currently running in demo mode. For full AI capabilities, please ensure your OpenAI API key is configured. How can I help you today?",
-            'internet_issue': "I understand you're having internet connectivity issues. Let me help you troubleshoot this step by step:\n\n1. Please check if all cables are securely connected\n2. Try restarting your router by unplugging it for 30 seconds\n3. Check if other devices can connect to the internet\n\nCan you tell me which step you'd like to try first?",
-            'file_received': f"I've received your {message_type}. In full mode, I would analyze this content for you. Currently running in demo mode.",
-            'voice_note': "I've received your voice message. In full mode, I would transcribe and analyze your audio. Currently running in demo mode.",
-            'default': "I'm here to help with your Telkom technical issues. Currently running in demo mode - for full AI capabilities, please configure your OpenAI API key. Can you describe the problem you're experiencing?"
-        }
-    }
-    
-    message_lower = message.lower() if isinstance(message, str) else ""
-    
-    if message_type == 'voice':
-        return responses['en']['voice_note']
-    elif message_type in ['image', 'video', 'pdf', 'document']:
-        return responses['en']['file_received']
-    elif any(word in message_lower for word in ['internet', 'connection', 'wifi', 'slow', 'not working']):
-        return responses['en']['internet_issue']
-    elif any(word in message_lower for word in ['hello', 'hi', 'help', 'start']):
-        return responses['en']['greeting']
-    else:
-        return responses['en']['default']
 
 @app.route('/')
 def index():
@@ -120,109 +116,56 @@ def index():
 def send_message():
     """Handle sending messages (text, files, voice notes)"""
     try:
-        session_id = request.form.get('session_id', str(uuid.uuid4()))
+        session_id = request.form.get('session_id') or str(uuid.uuid4())
         
         if session_id not in chat_sessions:
             chat_sessions[session_id] = []
         
-        # Get text message (can be combined with file)
         text_message = request.form.get('message', '').strip()
-        
-        # Handle voice note (base64 audio data)
-        if 'voice_data' in request.files:
-            voice_file = request.files['voice_data']
-            if voice_file:
-                # Save voice note with proper audio format
-                voice_filename = f"voice_{uuid.uuid4()}.webm"
-                voice_path = os.path.join(UPLOAD_FOLDER, voice_filename)
-                voice_file.save(voice_path)
-                
-                user_message = {
-                    'id': len(chat_sessions[session_id]) + 1,
-                    'type': 'user',
-                    'content': "🎵 Voice message",
-                    'message_type': 'voice',
-                    'file_path': voice_path,
-                    'timestamp': datetime.now().strftime('%H:%M')
-                }
-                chat_sessions[session_id].append(user_message)
-                
-                # Generate AI response using Gemini
-                ai_response_text = asyncio.run(generate_ai_response(
-                message_content=message_for_ai, message_type=file_type,
-                file_path=file_path, session_id=session_id
-                ))
-                
-                ai_message = {
-                    'id': len(chat_sessions[session_id]) + 1,
-                    'type': 'ai',
-                    'content': ai_response_text,
-                    'message_type': 'text',
-                    'timestamp': datetime.now().strftime('%H:%M')
-                }
-                chat_sessions[session_id].append(ai_message)
-                
-                return jsonify({
-                    'status': 'success',
-                    'user_message': user_message,
-                    'ai_message': ai_message,
-                    'session_id': session_id
-                })
-        
-        # Handle file upload (can be combined with text)
-        elif 'file' in request.files:
-            file = request.files['file']
-            if file and file.filename and allowed_file(file.filename):
+        file = request.files.get('file') or request.files.get('voice_data')
+
+        user_message = None
+        ai_response_text = None
+
+        if file and file.filename:
+            if allowed_file(file.filename):
                 filename = secure_filename(file.filename)
-                file_path = os.path.join(UPLOAD_FOLDER, f"{uuid.uuid4()}_{filename}")
+                file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{uuid.uuid4()}_{filename}")
                 file.save(file_path)
                 
                 file_type = get_file_type(filename)
                 
-                # Create message content (file + optional text)
-                if text_message:
-                    content = f"{text_message}\n📎 {filename}"
-                    message_for_ai = text_message
+                # Create user message for display
+                if file_type == 'audio':
+                     display_content = "🎵 Voice message"
                 else:
-                    content = f"📎 {filename}"
-                    message_for_ai = f"Analyze this {file_type}: {filename}"
+                     display_content = f"📎 {filename}"
                 
-                # Add user message
+                if text_message:
+                    display_content = f"{text_message} \n {display_content}"
+
                 user_message = {
                     'id': len(chat_sessions[session_id]) + 1,
                     'type': 'user',
-                    'content': content,
+                    'content': display_content,
                     'message_type': file_type,
                     'file_path': file_path,
-                    'text_content': text_message if text_message else None,
+                    'text_content': text_message,
                     'timestamp': datetime.now().strftime('%H:%M')
                 }
                 chat_sessions[session_id].append(user_message)
                 
-                # Generate AI response using Gemini
-                ai_response_text = asyncio.run(generate_ai_response(
-                message_content=text_message, session_id=session_id
-                ))
-                
-                ai_message = {
-                    'id': len(chat_sessions[session_id]) + 1,
-                    'type': 'ai',
-                    'content': ai_response_text,
-                    'message_type': 'text',
-                    'timestamp': datetime.now().strftime('%H:%M')
-                }
-                chat_sessions[session_id].append(ai_message)
-                
-                return jsonify({
-                    'status': 'success',
-                    'user_message': user_message,
-                    'ai_message': ai_message,
-                    'session_id': session_id
-                })
-        
-        # Handle text-only message
+                # Generate AI response
+                ai_response_text = generate_ai_response(
+                    message_content=text_message,
+                    message_type=file_type,
+                    file_path=file_path,
+                    session_id=session_id
+                )
+            else:
+                return jsonify({'status': 'error', 'message': 'File type not allowed.'})
+
         elif text_message:
-            # Add user message
             user_message = {
                 'id': len(chat_sessions[session_id]) + 1,
                 'type': 'user',
@@ -232,13 +175,16 @@ def send_message():
             }
             chat_sessions[session_id].append(user_message)
             
-            # Generate AI response using OpenAI
-            ai_response_text = asyncio.run(generate_ai_response(
+            ai_response_text = generate_ai_response(
                 message_content=text_message,
                 message_type='text',
                 session_id=session_id
-            ))
-            
+            )
+        
+        else:
+            return jsonify({'status': 'error', 'message': 'No content provided'})
+
+        if ai_response_text:
             ai_message = {
                 'id': len(chat_sessions[session_id]) + 1,
                 'type': 'ai',
@@ -254,11 +200,11 @@ def send_message():
                 'ai_message': ai_message,
                 'session_id': session_id
             })
-        
-        else:
-            return jsonify({'status': 'error', 'message': 'No content provided'})
+
+        return jsonify({'status': 'error', 'message': 'Could not generate AI response.'})
             
     except Exception as e:
+        print(f"ERROR in send_message: {e}")
         return jsonify({'status': 'error', 'message': str(e)})
 
 @app.route('/get_chat_history/<session_id>')
@@ -274,7 +220,6 @@ def get_chat_history(session_id):
             'status': 'success',
             'messages': []
         })
-
 
 # Run the app
 if __name__ == '__main__':

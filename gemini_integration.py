@@ -5,6 +5,7 @@ from typing import Dict, Any, List
 import google.generativeai as genai
 from PIL import Image
 import PyPDF2
+import time
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -25,13 +26,9 @@ class GeminiIntegration:
         
         self.system_prompt = self._create_telkom_system_prompt()
         
-        # Initialize models with the system prompt
-        self.text_model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
-            system_instruction=self.system_prompt
-        )
-        self.vision_model = genai.GenerativeModel(
-            model_name='gemini-2.5-flash',
+        # Initialize single model for all operations
+        self.model = genai.GenerativeModel(
+            model_name='gemini-2.0-flash',
             system_instruction=self.system_prompt
         )
         
@@ -55,10 +52,59 @@ Always be helpful, patient, and professional. Provide step-by-step instructions 
         formatted = []
         for msg in history:
             role = 'user' if msg['type'] == 'user' else 'model'
-            # Use text_content if available (for file uploads with text), otherwise use content
             content = msg.get('text_content', msg.get('content', ''))
             formatted.append({'role': role, 'parts': [content]})
         return formatted
+
+    async def process_audio_message(
+        self,
+        audio_path: str,
+        text_message: str = "",
+        conversation_history: List[Dict] = None
+    ) -> Dict[str, Any]:
+        """Process audio file by uploading it to the File API."""
+        try:
+            logger.info(f"Uploading audio file: {audio_path}")
+            
+            if not os.path.exists(audio_path):
+                raise FileNotFoundError(f"Audio file not found: {audio_path}")
+            
+            audio_file = genai.upload_file(path=audio_path)
+            
+            # Wait for processing
+            max_wait = 30
+            waited = 0
+            while audio_file.state.name == "PROCESSING" and waited < max_wait:
+                time.sleep(2)
+                waited += 2
+                audio_file = genai.get_file(audio_file.name)
+            
+            if audio_file.state.name == "FAILED":
+                raise ValueError("Audio file processing failed.")
+            
+            if audio_file.state.name != "ACTIVE":
+                raise ValueError(f"Audio file not ready: {audio_file.state.name}")
+            
+            logger.info(f"Audio file {audio_file.name} is now ACTIVE.")
+
+            chat_session = self.model.start_chat(
+                history=self._format_history(conversation_history or [])
+            )
+            
+            user_prompt = text_message or "Please transcribe and analyze this audio file for any Telkom technical support issues."
+            
+            response = chat_session.send_message([user_prompt, audio_file])
+            
+            return {
+                'success': True,
+                'response': response.text,
+                'model_used': 'gemini-2.0-flash',
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing audio with Gemini: {str(e)}")
+            return self._create_error_response(e)
 
     async def process_text_message(
         self, 
@@ -67,15 +113,15 @@ Always be helpful, patient, and professional. Provide step-by-step instructions 
     ) -> Dict[str, Any]:
         """Process text message and generate AI response"""
         try:
-            chat_session = self.text_model.start_chat(
+            chat_session = self.model.start_chat(
                 history=self._format_history(conversation_history or [])
             )
-            response = await chat_session.send_message_async(message)
+            response = chat_session.send_message(message)
             
             return {
                 'success': True,
                 'response': response.text,
-                'model_used': 'gemini-2.5-flash',
+                'model_used': 'gemini-2.0-flash',
                 'timestamp': datetime.now().isoformat()
             }
         except Exception as e:
@@ -85,19 +131,29 @@ Always be helpful, patient, and professional. Provide step-by-step instructions 
     async def process_image_message(
         self, 
         image_path: str, 
-        text_message: str = ""
+        text_message: str = "",
+        conversation_history: List[Dict] = None
     ) -> Dict[str, Any]:
-        """Process image with optional text message"""
+        """Process image with optional text message and history"""
         try:
-            img = Image.open(image_path)
-            prompt = text_message or "Analyze this image for technical issues or information that might help with Telkom technical support."
+            if not os.path.exists(image_path):
+                raise FileNotFoundError(f"Image file not found: {image_path}")
             
-            response = await self.vision_model.generate_content_async([prompt, img])
+            img = Image.open(image_path)
+            
+            chat_session = self.model.start_chat(
+                history=self._format_history(conversation_history or [])
+            )
+
+            user_prompt = text_message or "Please analyze this image for any Telkom technical support issues or error messages."
+            message_parts = [user_prompt, img]
+            
+            response = chat_session.send_message(message_parts)
             
             return {
                 'success': True,
                 'response': response.text,
-                'model_used': 'gemini-2.5-flash',
+                'model_used': 'gemini-2.0-flash',
                 'timestamp': datetime.now().isoformat()
             }
         except Exception as e:
@@ -107,20 +163,28 @@ Always be helpful, patient, and professional. Provide step-by-step instructions 
     async def process_pdf_document(
         self, 
         pdf_path: str, 
-        text_message: str = ""
+        text_message: str = "",
+        conversation_history: List[Dict] = None
     ) -> Dict[str, Any]:
         """Process PDF document by extracting text"""
         try:
+            if not os.path.exists(pdf_path):
+                raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+            
             pdf_text = self._extract_pdf_text(pdf_path)
             combined_message = f"""
             User message: {text_message}
             
-            PDF Content Summary:
-            {pdf_text[:4000]}
+            PDF Content:
+            {pdf_text[:8000]}
             
-            Please analyze this document and help with any Telkom technical issues mentioned.
+            Please analyze the document content and help with any Telkom technical issues mentioned.
             """
-            return await self.process_text_message(message=combined_message)
+            
+            return await self.process_text_message(
+                message=combined_message, 
+                conversation_history=conversation_history
+            )
             
         except Exception as e:
             logger.error(f"Error processing PDF with Gemini: {str(e)}")

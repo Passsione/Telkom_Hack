@@ -6,5 +6,5 @@ SpeechRecognition
 PyPDF2
 Werkzeug
 Requests
--q -U google-genai
-google-generativeai pillow
+google-generativeai
+nest-asyncio
