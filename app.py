@@ -63,11 +63,11 @@ def generate_ai_response(message_content, message_type='text', file_path=None, s
         conversation_history = chat_sessions.get(session_id, [])[-6:]
         
         # Get or create event loop
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # try:
+        loop = asyncio.get_event_loop()
+        # except RuntimeError:
+        #     loop = asyncio.new_event_loop()
+        #     asyncio.set_event_loop(loop)
         
         if message_type == 'image' and file_path:
             response_data = loop.run_until_complete(
