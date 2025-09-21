@@ -18,6 +18,12 @@ class GeminiIntegration:
     
     def __init__(self, api_key: str = None):
         """Initialize the Google GenAI client"""
+        self.supported_audio_formats = {
+            '.wav': 'audio/wav',
+            '.mp3': 'audio/mp3',
+            '.ogg': 'audio/ogg',
+            '.webm': 'audio/webm'
+        }
         self.api_key = api_key or os.environ.get('GEMINI_API_KEY')
         if not self.api_key:
             raise ValueError("Google API key is required. Set GEMINI_API_KEY environment variable.")
@@ -56,6 +62,7 @@ class GeminiIntegration:
             formatted.append({'role': role, 'parts': [content]})
         return formatted
 
+    
     def _validate_audio_file(self, audio_path: str) -> Dict[str, Any]:
         """Validate audio file format and size"""
         try:

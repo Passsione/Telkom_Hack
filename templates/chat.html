@@ -131,16 +131,16 @@
                    accept=".jpg,.jpeg,.png,.gif,.mp4,.avi,.mov,.pdf,.doc,.docx,.wav,.mp3,.ogg">
 
             <!-- Attachment Menu (hidden by default) -->
-            <div id="attachmentMenu" class="absolute bottom-20 left-4 right-4 bg-white rounded-lg shadow-xl border border-gray-200 p-4 hidden">
-                <div class="grid grid-cols-3 gap-4 text-center">
+            <div id="attachmentMenu" class="static bottom-20 left-4 right-4 bg-white rounded-lg shadow-xl border border-gray-200 p-4 hidden">
+                <div class="grid grid-cols-2 gap-4 text-center">
                     <button onclick="selectFileType('image')" class="p-3 hover:bg-gray-50 rounded-lg transition-colors">
                         <i class="fas fa-image text-2xl text-purple-500 mb-2"></i>
                         <p class="text-sm text-gray-700">Photo</p>
                     </button>
-                    <button onclick="selectFileType('video')" class="p-3 hover:bg-gray-50 rounded-lg transition-colors">
+                    <!-- <button onclick="selectFileType('video')" class="p-3 hover:bg-gray-50 rounded-lg transition-colors">
                         <i class="fas fa-video text-2xl text-red-500 mb-2"></i>
                         <p class="text-sm text-gray-700">Video</p>
-                    </button>
+                    </button> -->
                     <button onclick="selectFileType('document')" class="p-3 hover:bg-gray-50 rounded-lg transition-colors">
                         <i class="fas fa-file-alt text-2xl text-blue-500 mb-2"></i>
                         <p class="text-sm text-gray-700">Document</p>
